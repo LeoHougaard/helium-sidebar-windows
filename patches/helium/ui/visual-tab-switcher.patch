@@ -641,10 +641,10 @@ index 5910143..afb7f32 100644
    std::unique_ptr<views::EventMonitor> zen_mode_event_monitor_;
 diff --git a/chrome/browser/ui/views/tabs/visual_tab_switcher.cc b/chrome/browser/ui/views/tabs/visual_tab_switcher.cc
 new file mode 100644
-index 0000000..c288ef7
+index 0000000..3bb7b4a
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/visual_tab_switcher.cc
-@@ -0,0 +1,569 @@
+@@ -0,0 +1,594 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -697,7 +697,8 @@ index 0000000..c288ef7
 +namespace {
 +
 +constexpr int kWindowInset = 24;
-+constexpr int kListMaxWidth = 1000;
++constexpr int kListMaxWidth = 700;
++constexpr int kMinListWidthWithPreview = 480;
 +constexpr int kStripMaxWidth = 1400;
 +constexpr int kPopupCornerRadius = 8;
 +constexpr int kContentPadding = 16;
@@ -709,7 +710,8 @@ index 0000000..c288ef7
 +constexpr int kThumbnailWidth = 184;
 +constexpr int kThumbnailHeight = 124;
 +constexpr int kTileLabelHeight = 28;
-+constexpr int kListPreviewHeight = 280;
++constexpr int kListPreviewHeight = 220;
++constexpr int kPlaceholderIconSize = 24;
 +constexpr int kStripHeight = 230;
 +constexpr int kSelectionCornerRadius = 4;
 +constexpr base::TimeDelta kRevealDelay = base::Milliseconds(250);
@@ -761,12 +763,29 @@ index 0000000..c288ef7
 +      ->GetTitle();
 +}
 +
++ui::ImageModel GetTabFavicon(content::WebContents* contents) {
++  return TabUIHelper::From(tabs::TabInterface::GetFromContents(contents))
++      ->GetFavicon();
++}
++
 +std::unique_ptr<views::ImageView> MakePreview(const gfx::Size& size) {
 +  auto image = std::make_unique<views::ImageView>();
-+  image->SetImageSize(size);
 +  image->SetPreferredSize(size);
++  image->SetBackground(views::CreateRoundedRectBackground(
++      ui::kColorMenuItemBackgroundHighlighted, kSelectionCornerRadius));
++  image->SetCornerRadius(kSelectionCornerRadius);
 +  image->GetViewAccessibility().SetIsIgnored(true);
 +  return image;
++}
++
++void SetPreviewPlaceholder(views::ImageView* view,
++                           const ui::ImageModel& favicon) {
++  gfx::Size size = view->GetPreferredSize({});
++  size.SetToMin(gfx::Size(kPlaceholderIconSize, kPlaceholderIconSize));
++  if (view->GetImageBounds().size() != size) {
++    view->SetImageSize(size);
++  }
++  view->SetImage(favicon);
 +}
 +
 +}  // namespace
@@ -879,7 +898,7 @@ index 0000000..c288ef7
 +      std::make_unique<SwitcherContents>(weak_factory_.GetWeakPtr());
 +  contents_ = contents.get();
 +  contents->SetBackground(views::CreateRoundedRectBackground(
-+      ui::kColorSysSurface, kPopupCornerRadius));
++      ui::kColorMenuBackground, kPopupCornerRadius));
 +  auto* layout = contents->SetLayoutManager(std::make_unique<views::BoxLayout>(
 +      views::BoxLayout::Orientation::kVertical, gfx::Insets(kContentPadding),
 +      kContentSpacing));
@@ -888,16 +907,19 @@ index 0000000..c288ef7
 +      views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
 +      kPreviewSpacing));
 +  layout->SetFlexForView(body, 1);
-+  if (list_mode_) {
-+    preview_ = body->AddChildView(
-+        MakePreview(gfx::Size(width / 3, kListPreviewHeight)));
-+    preview_->SetVerticalAlignment(views::ImageView::Alignment::kLeading);
++  const int body_height =
++      std::max(1, bounds.height() - layout->inside_border_insets().height());
++  if (list_mode_ && width >= kMinListWidthWithPreview) {
++    const int preview_width =
++        (width - layout->inside_border_insets().width() - kPreviewSpacing) / 3;
++    preview_ = body->AddChildView(MakePreview(
++        gfx::Size(preview_width, std::min(kListPreviewHeight, body_height))));
 +  }
 +  auto scroll = std::make_unique<views::ScrollView>(
 +      views::ScrollView::ScrollWithLayers::kEnabled);
 +  scroll->SetUseContentsPreferredSize(!list_mode_);
 +  if (list_mode_) {
-+    scroll->ClipHeightTo(0, std::max(1, bounds.height()));
++    scroll->ClipHeightTo(0, body_height);
 +  }
 +  scroll->SetHorizontalScrollBarMode(
 +      list_mode_ ? views::ScrollView::ScrollBarMode::kDisabled
@@ -913,17 +935,15 @@ index 0000000..c288ef7
 +  for (size_t i = 0; i < tabs_.size(); ++i) {
 +    const auto callback = base::BindRepeating(&VisualTabSwitcher::AcceptTab,
 +                                              weak_factory_.GetWeakPtr(), i);
-+    auto favicon =
-+        TabUIHelper::From(tabs::TabInterface::GetFromContents(tabs_[i]))
-+            ->GetFavicon();
++    const auto favicon = GetTabFavicon(tabs_[i]);
 +    views::Button* button;
++    views::LabelButton* label;
 +    if (list_mode_) {
-+      auto row =
-+          std::make_unique<views::LabelButton>(callback, GetTabTitle(tabs_[i]));
-+      row->SetImageModel(views::Button::STATE_NORMAL, favicon);
-+      row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-+      row->SetMinSize(gfx::Size(0, kListRowHeight));
-+      button = items->AddChildView(std::move(row));
++      label = items->AddChildView(
++          std::make_unique<views::LabelButton>(callback, GetTabTitle(tabs_[i])));
++      label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++      label->SetMinSize(gfx::Size(0, kListRowHeight));
++      button = label;
 +    } else {
 +      auto tile = std::make_unique<SwitcherButton>(callback);
 +      tile->SetLayoutManager(std::make_unique<views::BoxLayout>(
@@ -931,21 +951,23 @@ index 0000000..c288ef7
 +          kItemSpacing));
 +      auto* image = tile->AddChildView(
 +          MakePreview(gfx::Size(kThumbnailWidth, kThumbnailHeight)));
++      SetPreviewPlaceholder(image, favicon);
 +      images_.push_back(image);
-+      auto* label = tile->AddChildView(std::make_unique<views::LabelButton>(
++      label = tile->AddChildView(std::make_unique<views::LabelButton>(
 +          views::Button::PressedCallback(), GetTabTitle(tabs_[i])));
-+      label->SetImageModel(views::Button::STATE_NORMAL, favicon);
 +      label->SetMaxSize(gfx::Size(kThumbnailWidth, kTileLabelHeight));
 +      label->SetCanProcessEventsWithinSubtree(false);
 +      label->SetFocusBehavior(views::View::FocusBehavior::NEVER);
 +      label->GetViewAccessibility().SetIsIgnored(true);
 +      button = items->AddChildView(std::move(tile));
 +    }
++    label->SetImageModel(views::Button::STATE_NORMAL, favicon);
++    label->SetEnabledTextColors(ui::kColorMenuItemForeground);
 +    button->SetFocusBehavior(views::View::FocusBehavior::ACCESSIBLE_ONLY);
 +    button->GetViewAccessibility().SetRole(ax::mojom::Role::kListBoxOption);
 +    button->GetViewAccessibility().SetName(GetTabTitle(tabs_[i]));
 +    button->GetViewAccessibility().SetIsSelected(false);
-+    buttons_.push_back(button);
++    buttons_.push_back({button, label});
 +  }
 +  if (!list_mode_) {
 +    subscriptions_.resize(tabs_.size());
@@ -963,17 +985,10 @@ index 0000000..c288ef7
 +        }
 +      },
 +      weak_factory_.GetWeakPtr()));
-+  title_ = contents->AddChildView(
-+      std::make_unique<views::Label>(GetTabTitle(tabs_[selected_])));
-+  if (list_mode_) {
-+    const int available_preview_height =
-+        std::max(1, bounds.height() - layout->inside_border_insets().height() -
-+                        layout->between_child_spacing() -
-+                        title_->GetPreferredSize({}).height());
-+    const gfx::Size preview_size(
-+        width / 3, std::min(kListPreviewHeight, available_preview_height));
-+    preview_->SetImageSize(preview_size);
-+    preview_->SetPreferredSize(preview_size);
++  if (!list_mode_) {
++    title_ = contents->AddChildView(
++        std::make_unique<views::Label>(GetTabTitle(tabs_[selected_])));
++    title_->SetEnabledColor(ui::kColorMenuItemForeground);
 +  }
 +  const int height =
 +      std::max(1, std::min(bounds.height(),
@@ -998,19 +1013,23 @@ index 0000000..c288ef7
 +
 +void VisualTabSwitcher::UpdateSelection(std::optional<size_t> previous) {
 +  if (previous && *previous != selected_) {
-+    buttons_[*previous]->SetBackground(nullptr);
-+    buttons_[*previous]->GetViewAccessibility().SetIsSelected(false);
++    const auto& old = buttons_[*previous];
++    old.button->SetBackground(nullptr);
++    old.button->GetViewAccessibility().SetIsSelected(false);
++    old.label->SetEnabledTextColors(ui::kColorMenuItemForeground);
 +  }
-+  auto* selected_button = buttons_[selected_].get();
-+  selected_button->SetBackground(views::CreateRoundedRectBackground(
-+      ui::kColorSysPrimaryContainer, kSelectionCornerRadius));
-+  selected_button->GetViewAccessibility().SetIsSelected(true);
-+  contents_->GetViewAccessibility().SetActiveDescendant(*selected_button);
-+  title_->SetText(GetTabTitle(tabs_[selected_]));
-+  selected_button->ScrollViewToVisible();
++  const auto& selected = buttons_[selected_];
++  selected.button->SetBackground(views::CreateRoundedRectBackground(
++      ui::kColorMenuItemBackgroundSelected, kSelectionCornerRadius));
++  selected.button->GetViewAccessibility().SetIsSelected(true);
++  selected.label->SetEnabledTextColors(ui::kColorMenuItemForegroundSelected);
++  contents_->GetViewAccessibility().SetActiveDescendant(*selected.button);
++  selected.button->ScrollViewToVisible();
++  if (title_) {
++    title_->SetText(GetTabTitle(tabs_[selected_]));
++  }
 +  if (preview_) {
 +    subscriptions_.clear();
-+    preview_->SetImage(ui::ImageModel());
 +    subscriptions_.push_back(Subscribe(preview_, tabs_[selected_]));
 +  } else {
 +    UpdateVisibleThumbnails();
@@ -1028,7 +1047,7 @@ index 0000000..c288ef7
 +      }
 +    } else if (subscriptions_[i]) {
 +      subscriptions_[i].reset();
-+      images_[i]->SetImage(ui::ImageModel());
++      SetPreviewPlaceholder(images_[i], GetTabFavicon(tabs_[i]));
 +    }
 +  }
 +}
@@ -1036,35 +1055,41 @@ index 0000000..c288ef7
 +std::unique_ptr<ThumbnailImage::Subscription> VisualTabSwitcher::Subscribe(
 +    views::ImageView* image,
 +    content::WebContents* contents) {
++  const auto favicon = GetTabFavicon(contents);
 +  auto* model = browser_view_->browser()->GetTabStripModel();
 +  auto* tab = model->GetTabForWebContents(contents);
 +  auto* helper = tab ? ThumbnailTabHelper::From(tab) : nullptr;
 +  if (!helper) {
++    SetPreviewPlaceholder(image, favicon);
 +    return nullptr;
 +  }
 +  auto thumbnail = helper->thumbnail();
 +  auto subscription = thumbnail->Subscribe();
 +  subscription->SetSizeHint(image->GetPreferredSize({}));
 +  subscription->SetUncompressedImageCallback(base::BindRepeating(
-+      &VisualTabSwitcher::OnThumbnail, weak_factory_.GetWeakPtr(), image));
-+  OnThumbnail(image, thumbnail->GetCachedPreview(image->GetPreferredSize({})));
-+  helper->CaptureThumbnailForPreview();
++      &VisualTabSwitcher::OnThumbnail, weak_factory_.GetWeakPtr(), image,
++      favicon));
++  OnThumbnail(image, favicon,
++              thumbnail->GetCachedPreview(image->GetPreferredSize({})));
 +  thumbnail->RequestThumbnailImage();
 +  return subscription;
 +}
 +
 +void VisualTabSwitcher::OnThumbnail(views::ImageView* view,
++                                    const ui::ImageModel& favicon,
 +                                    gfx::ImageSkia image) {
-+  if (!image.isNull()) {
-+    const gfx::Size bounds = view->GetPreferredSize({});
-+    const float scale =
-+        std::min(static_cast<float>(bounds.width()) / image.width(),
-+                 static_cast<float>(bounds.height()) / image.height());
-+    gfx::Size size = gfx::ScaleToRoundedSize(image.size(), scale);
-+    size.SetToMax(gfx::Size(1, 1));
-+    if (view->GetImageBounds().size() != size) {
-+      view->SetImageSize(size);
-+    }
++  if (image.isNull()) {
++    SetPreviewPlaceholder(view, favicon);
++    return;
++  }
++  const gfx::Size bounds = view->GetPreferredSize({});
++  const float scale =
++      std::min(static_cast<float>(bounds.width()) / image.width(),
++               static_cast<float>(bounds.height()) / image.height());
++  gfx::Size size = gfx::ScaleToRoundedSize(image.size(), scale);
++  size.SetToMax(gfx::Size(1, 1));
++  if (view->GetImageBounds().size() != size) {
++    view->SetImageSize(size);
 +  }
 +  view->SetImage(ui::ImageModel::FromImageSkia(image));
 +}
@@ -1216,10 +1241,10 @@ index 0000000..c288ef7
 +}
 diff --git a/chrome/browser/ui/views/tabs/visual_tab_switcher.h b/chrome/browser/ui/views/tabs/visual_tab_switcher.h
 new file mode 100644
-index 0000000..78f5662
+index 0000000..0ca69b7
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/visual_tab_switcher.h
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,111 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -1248,6 +1273,7 @@ index 0000000..78f5662
 +class WebContents;
 +}
 +namespace ui {
++class ImageModel;
 +class KeyEvent;
 +}
 +namespace views {
@@ -1255,6 +1281,7 @@ index 0000000..78f5662
 +class EventMonitor;
 +class ImageView;
 +class Label;
++class LabelButton;
 +class View;
 +}  // namespace views
 +
@@ -1273,6 +1300,11 @@ index 0000000..78f5662
 +  void Close(bool accept);
 +
 + private:
++  struct ButtonViews {
++    raw_ptr<views::Button> button;
++    raw_ptr<views::LabelButton> label;
++  };
++
 +  void Show();
 +  void UpdateSelection(std::optional<size_t> previous = std::nullopt);
 +  void UpdateVisibleThumbnails();
@@ -1280,7 +1312,9 @@ index 0000000..78f5662
 +  std::unique_ptr<ThumbnailImage::Subscription> Subscribe(
 +      views::ImageView* image,
 +      content::WebContents* contents);
-+  void OnThumbnail(views::ImageView* view, gfx::ImageSkia image);
++  void OnThumbnail(views::ImageView* view,
++                   const ui::ImageModel& favicon,
++                   gfx::ImageSkia image);
 +
 +  void OnTabStripModelChanged(
 +      TabStripModel* model,
@@ -1309,7 +1343,7 @@ index 0000000..78f5662
 +  base::ScopedObservation<views::Widget, views::WidgetObserver>
 +      widget_observation_{this};
 +  std::vector<raw_ptr<content::WebContents>> tabs_;
-+  std::vector<raw_ptr<views::Button>> buttons_;
++  std::vector<ButtonViews> buttons_;
 +  std::vector<raw_ptr<views::ImageView>> images_;
 +  std::vector<std::unique_ptr<ThumbnailImage::Subscription>> subscriptions_;
 +  raw_ptr<views::View> contents_ = nullptr;
