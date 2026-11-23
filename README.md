@@ -1,3 +1,12 @@
+## Compact sidebar build
+
+This personal Helium build adds the PR #2367 sidebar, a compact row for navigation and Windows controls, and a recent-tab Ctrl+Tab switcher.
+
+Download the portable ZIP from [Releases](../../releases), extract it, and run **Open Helium PR 2367.cmd**. The launcher uses a separate browser profile. The build targets Windows x64 and is based on Helium 0.22.2.1. Updates require a new custom build.
+
+Clone with submodules to get the Windows patches and the pinned browser source.
+
+
 # helium-windows
 
 Windows packaging for [Helium](https://github.com/imputnet/helium).
