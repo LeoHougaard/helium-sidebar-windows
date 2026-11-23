@@ -1,6 +1,8 @@
+diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
+index eef022f..d4d7651 100644
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -10922,6 +10922,9 @@ Keep your key file in a safe place. You
+@@ -11018,6 +11018,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
            Pin tab search
          </message>
        </if>
@@ -10,17 +12,68 @@
        <message name="IDS_TAB_SEARCH_BUTTON_CXMENU_UNPIN" desc="Name of the tab search button context menu item for unpinning tab search.">
          Unpin
        </message>
---- a/chrome/browser/ui/BUILD.gn
-+++ b/chrome/browser/ui/BUILD.gn
-@@ -2772,6 +2772,8 @@ static_library("ui") {
-       "views/helium/native_frame_materials.h",
-       "views/tab_search_bubble_host.cc",
-       "views/tab_search_bubble_host.h",
-+      "views/tabs/visual_tab_switcher.cc",
-+      "views/tabs/visual_tab_switcher.h",
-       "views/web_apps/frame_toolbar/web_app_frame_toolbar_view.cc",
-       "views/web_apps/frame_toolbar/web_app_frame_toolbar_view.h",
-       "views/web_apps/frame_toolbar/web_app_menu_button.cc",
+diff --git a/chrome/browser/global_keyboard_shortcuts_mac.h b/chrome/browser/global_keyboard_shortcuts_mac.h
+index e755000..cf61a06 100644
+--- a/chrome/browser/global_keyboard_shortcuts_mac.h
++++ b/chrome/browser/global_keyboard_shortcuts_mac.h
+@@ -9,6 +9,7 @@
+ 
+ #include <vector>
+ 
++#include "base/apple/owned_objc.h"
+ #include "ui/base/accelerators/accelerator.h"
+ 
+ #if defined(__OBJC__)
+@@ -43,6 +44,9 @@ struct CommandForKeyEventResult {
+   bool from_main_menu;
+ };
+ 
++CommandForKeyEventResult CommandForKeyEvent(
++    const base::apple::OwnedNSEvent& event);
++
+ #if defined(__OBJC__)
+ 
+ // macOS applications are supposed to put all keyEquivalents [hotkeys] in the
+diff --git a/chrome/browser/global_keyboard_shortcuts_mac.mm b/chrome/browser/global_keyboard_shortcuts_mac.mm
+index f7e0866..fc70352 100644
+--- a/chrome/browser/global_keyboard_shortcuts_mac.mm
++++ b/chrome/browser/global_keyboard_shortcuts_mac.mm
+@@ -223,6 +223,11 @@ const std::vector<NSMenuItem*>& GetMenuItemsNotPresentInMainMenu() {
+   return *menu_items;
+ }
+ 
++CommandForKeyEventResult CommandForKeyEvent(
++    const base::apple::OwnedNSEvent& event) {
++  return event ? CommandForKeyEvent(event.Get()) : NoCommand();
++}
++
+ CommandForKeyEventResult CommandForKeyEvent(NSEvent* event) {
+   CHECK(event, base::NotFatalUntil::M162);
+   if ([event type] != NSEventTypeKeyDown)
+diff --git a/chrome/browser/ui/thumbnails/BUILD.gn b/chrome/browser/ui/thumbnails/BUILD.gn
+index 7064d09..0314cc7 100644
+--- a/chrome/browser/ui/thumbnails/BUILD.gn
++++ b/chrome/browser/ui/thumbnails/BUILD.gn
+@@ -27,6 +27,7 @@ if (!is_android) {
+ 
+     public_deps = [
+       "//base",
++      "//components/prefs",
+       "//components/viz/host",
+       "//content/public/browser",
+       "//skia",
+@@ -36,7 +37,9 @@ if (!is_android) {
+     ]
+ 
+     deps = [
++      "//chrome/browser/profiles:profile",
+       "//chrome/browser/ui/tabs",
++      "//chrome/common",
+       "//components/tabs:public",
+       "//media/capture/mojom:video_capture_buffer",
+       "//ui/gfx/codec",
+diff --git a/chrome/browser/ui/thumbnails/thumbnail_image.cc b/chrome/browser/ui/thumbnails/thumbnail_image.cc
+index c3d13e4..13e1e72 100644
 --- a/chrome/browser/ui/thumbnails/thumbnail_image.cc
 +++ b/chrome/browser/ui/thumbnails/thumbnail_image.cc
 @@ -12,6 +12,7 @@
@@ -31,9 +84,9 @@
  #include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
  #include "third_party/skia/include/core/SkBitmap.h"
  #include "ui/gfx/codec/jpeg_codec.h"
-@@ -43,6 +44,10 @@ ThumbnailImage::ThumbnailImage(Delegate*
-   DCHECK(delegate_);
-   DCHECK(!delegate_->thumbnail_);
+@@ -43,6 +44,10 @@ ThumbnailImage::ThumbnailImage(Delegate* delegate, CompressedThumbnailData data)
+   CHECK(delegate_, base::NotFatalUntil::M162);
+   CHECK(!delegate_->thumbnail_, base::NotFatalUntil::M162);
    delegate_->thumbnail_ = this;
 +  if (data_) {
 +    thumbnail_id_ = base::Token::CreateRandom();
@@ -42,7 +95,7 @@
  }
  
  ThumbnailImage::~ThumbnailImage() {
-@@ -74,6 +79,8 @@ std::unique_ptr<ThumbnailImage::Subscrip
+@@ -74,6 +79,8 @@ std::unique_ptr<ThumbnailImage::Subscription> ThumbnailImage::Subscribe() {
  void ThumbnailImage::AssignSkBitmap(SkBitmap bitmap,
                                      std::optional<uint64_t> frame_id) {
    thumbnail_id_ = base::Token::CreateRandom();
@@ -51,7 +104,7 @@
  
    base::ThreadPool::PostTaskAndReplyWithResult(
        FROM_HERE,
-@@ -84,6 +91,10 @@ void ThumbnailImage::AssignSkBitmap(SkBi
+@@ -84,6 +91,10 @@ void ThumbnailImage::AssignSkBitmap(SkBitmap bitmap,
        base::BindOnce(&ThumbnailImage::AssignJPEGData,
                       weak_ptr_factory_.GetWeakPtr(), thumbnail_id_,
                       base::TimeTicks::Now(), frame_id));
@@ -82,7 +135,7 @@
    thumbnail_id_ = base::Token();
  
    // Notify observers of the new, blank thumbnail.
-@@ -113,6 +127,71 @@ void ThumbnailImage::RequestThumbnailIma
+@@ -113,6 +127,71 @@ void ThumbnailImage::RequestThumbnailImage() {
    ConvertJPEGDataToImageSkiaAndNotifyObservers();
  }
  
@@ -154,7 +207,7 @@
  void ThumbnailImage::RequestCompressedThumbnailData() {
    if (data_) {
      NotifyCompressedDataObservers(data_);
-@@ -141,6 +220,7 @@ void ThumbnailImage::AssignJPEGData(base
+@@ -141,6 +220,7 @@ void ThumbnailImage::AssignJPEGData(base::Token thumbnail_id,
  
    data_ = base::MakeRefCounted<base::RefCountedData<std::vector<uint8_t>>>(
        std::move(data));
@@ -162,7 +215,7 @@
  
    // We select a TRACE_EVENT_* macro based on |frame_id|'s presence.
    // Since these are scoped traces, the macro invocation must be in the
-@@ -148,7 +228,13 @@ void ThumbnailImage::AssignJPEGData(base
+@@ -148,7 +228,13 @@ void ThumbnailImage::AssignJPEGData(base::Token thumbnail_id,
    // function.
    auto notify = [&]() {
      NotifyCompressedDataObservers(data_);
@@ -177,7 +230,7 @@
    };
  
    if (frame_id_for_trace) {
-@@ -176,7 +262,7 @@ bool ThumbnailImage::ConvertJPEGDataToIm
+@@ -176,7 +262,7 @@ bool ThumbnailImage::ConvertJPEGDataToImageSkiaAndNotifyObservers() {
         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
        base::BindOnce(&ThumbnailImage::UncompressImage, data_),
        base::BindOnce(&ThumbnailImage::NotifyUncompressedDataObservers,
@@ -186,7 +239,7 @@
  }
  
  void ThumbnailImage::NotifyUncompressedDataObservers(base::Token thumbnail_id,
-@@ -192,12 +278,20 @@ void ThumbnailImage::NotifyUncompressedD
+@@ -192,12 +278,20 @@ void ThumbnailImage::NotifyUncompressedDataObservers(base::Token thumbnail_id,
      return;
    }
  
@@ -207,17 +260,17 @@
        subscription->uncompressed_image_callback_.Run(cropped_image);
      }
    }
-@@ -248,7 +342,8 @@ gfx::ImageSkia ThumbnailImage::Uncompres
+@@ -248,7 +342,8 @@ gfx::ImageSkia ThumbnailImage::UncompressImage(
  // static
  gfx::ImageSkia ThumbnailImage::CropPreviewImage(
      const gfx::ImageSkia& source_image,
 -    const gfx::Size& minimum_size) {
 +    const gfx::Size& minimum_size,
 +    std::optional<gfx::Size> original_size) {
-   DCHECK(!source_image.isNull());
-   DCHECK(!source_image.size().IsEmpty());
-   DCHECK(!minimum_size.IsEmpty());
-@@ -257,9 +352,10 @@ gfx::ImageSkia ThumbnailImage::CropPrevi
+   CHECK(!source_image.isNull(), base::NotFatalUntil::M162);
+   CHECK(!source_image.size().IsEmpty(), base::NotFatalUntil::M162);
+   CHECK(!minimum_size.IsEmpty(), base::NotFatalUntil::M162);
+@@ -257,9 +352,10 @@ gfx::ImageSkia ThumbnailImage::CropPreviewImage(
    const float source_aspect =
        static_cast<float>(source_image.width()) / source_image.height();
  
@@ -230,9 +283,11 @@
      return source_image;
    }
  
+diff --git a/chrome/browser/ui/thumbnails/thumbnail_image.h b/chrome/browser/ui/thumbnails/thumbnail_image.h
+index 71b0bdd..984e865 100644
 --- a/chrome/browser/ui/thumbnails/thumbnail_image.h
 +++ b/chrome/browser/ui/thumbnails/thumbnail_image.h
-@@ -95,6 +95,7 @@ class ThumbnailImage : public base::RefC
+@@ -95,6 +95,7 @@ class ThumbnailImage : public base::RefCountedThreadSafe<ThumbnailImage> {
  
      scoped_refptr<ThumbnailImage> thumbnail_;
      std::optional<gfx::Size> size_hint_;
@@ -240,7 +295,7 @@
  
      UncompressedImageCallback uncompressed_image_callback_;
      CompressedImageCallback compressed_image_callback_;
-@@ -153,6 +154,9 @@ class ThumbnailImage : public base::RefC
+@@ -153,6 +154,9 @@ class ThumbnailImage : public base::RefCountedThreadSafe<ThumbnailImage> {
    // long it will take, though in most cases it should happen very quickly.
    void RequestThumbnailImage();
  
@@ -250,7 +305,7 @@
    // Similar to RequestThumbnailImage() but requests only the compressed JPEG
    // data. Users should listen for a call to
    // Observer::OnCompressedThumbnailDataAvailable().
-@@ -193,11 +197,19 @@ class ThumbnailImage : public base::RefC
+@@ -193,11 +197,19 @@ class ThumbnailImage : public base::RefCountedThreadSafe<ThumbnailImage> {
  
    // Crops and returns a preview from a thumbnail of an entire web page. Uses
    // logic appropriate for fixed-aspect previews (e.g. hover cards).
@@ -272,7 +327,7 @@
    raw_ptr<Delegate> delegate_;
  
    // This is a scoped_refptr to immutable data. Once set, the wrapped
-@@ -205,6 +217,13 @@ class ThumbnailImage : public base::RefC
+@@ -205,6 +217,13 @@ class ThumbnailImage : public base::RefCountedThreadSafe<ThumbnailImage> {
    // |data_| itself can be changed as this does not affect references to
    // the old data.
    CompressedThumbnailData data_;
@@ -286,18 +341,17 @@
  
    // A randomly generated ID associated with each image assigned by
    // AssignSkBitmap().
+diff --git a/chrome/browser/ui/thumbnails/thumbnail_tab_helper.cc b/chrome/browser/ui/thumbnails/thumbnail_tab_helper.cc
+index bd56285..0d782e1 100644
 --- a/chrome/browser/ui/thumbnails/thumbnail_tab_helper.cc
 +++ b/chrome/browser/ui/thumbnails/thumbnail_tab_helper.cc
-@@ -15,6 +15,7 @@
- #include "base/memory/raw_ptr.h"
+@@ -13,10 +13,13 @@
+ #include "base/functional/bind.h"
  #include "base/metrics/histogram_macros.h"
  #include "base/no_destructor.h"
 +#include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/tabs/tab_style.h"
  #include "chrome/browser/ui/tabs/tab_utils.h"
- #include "chrome/browser/ui/thumbnails/background_thumbnail_video_capturer.h"
-@@ -22,6 +23,8 @@
- #include "chrome/browser/ui/thumbnails/thumbnail_readiness_tracker.h"
  #include "chrome/browser/ui/thumbnails/thumbnail_scheduler.h"
  #include "chrome/browser/ui/thumbnails/thumbnail_scheduler_impl.h"
 +#include "chrome/common/pref_names.h"
@@ -305,17 +359,7 @@
  #include "components/tabs/public/tab_interface.h"
  #include "components/viz/common/frame_sinks/copy_output_result.h"
  #include "content/public/browser/browser_thread.h"
-@@ -224,6 +227,9 @@ class ThumbnailTabHelper::TabStateTracke
-     }
-     page_readiness_ = readiness;
-     capture_driver_.UpdatePageReadiness(readiness);
-+    if (readiness == CaptureReadiness::kReadyForFinalCapture) {
-+      thumbnail_tab_helper_->CaptureThumbnailForPreview();
-+    }
-   }
- 
-   const raw_ptr<ThumbnailTabHelper> thumbnail_tab_helper_;
-@@ -243,6 +249,18 @@ class ThumbnailTabHelper::TabStateTracke
+@@ -114,6 +117,18 @@ enum class ThumbnailTabHelper::CaptureType {
  // ThumbnailTabHelper ----------------------------------------------------
  
  void ThumbnailTabHelper::CaptureThumbnailOnTabBackgrounded() {
@@ -331,13 +375,15 @@
 +}
 +
 +void ThumbnailTabHelper::CaptureThumbnail() {
-   if (!state_->is_ready()) {
+   if (page_readiness_ == CaptureReadiness::kNotReady) {
      return;
    }
-@@ -293,6 +311,13 @@ ThumbnailTabHelper::ThumbnailTabHelper(t
+@@ -167,7 +182,15 @@ ThumbnailTabHelper::ThumbnailTabHelper(tabs::TabInterface& tab,
+       thumbnail_(base::MakeRefCounted<ThumbnailImage>(
+           this,
            DiscardedTabThumbnailData::TakeThumbnailDataIfAvailable(contents))),
-       scoped_unowned_user_data_(tab.GetUnownedUserDataHost(), *this) {
-   is_tab_discarded_ = contents->WasDiscarded();
+-      scoped_unowned_user_data_(tab.GetUnownedUserDataHost(), *this) {}
++      scoped_unowned_user_data_(tab.GetUnownedUserDataHost(), *this) {
 +  pref_change_registrar_.Init(
 +      Profile::FromBrowserContext(contents->GetBrowserContext())->GetPrefs());
 +  pref_change_registrar_.Add(
@@ -345,10 +391,21 @@
 +      base::BindRepeating(&ThumbnailTabHelper::UpdatePreviewCaching,
 +                          base::Unretained(this)));
 +  UpdatePreviewCaching();
- }
++}
  
  ThumbnailTabHelper::~ThumbnailTabHelper() {
-@@ -353,9 +378,16 @@ void ThumbnailTabHelper::StoreThumbnail(
+   StopVideoCapture();
+@@ -251,6 +274,9 @@ void ThumbnailTabHelper::PageReadinessChanged(CaptureReadiness readiness) {
+   }
+   page_readiness_ = readiness;
+   capture_driver_.UpdatePageReadiness(readiness);
++  if (readiness == CaptureReadiness::kReadyForFinalCapture) {
++    CaptureThumbnailForPreview();
++  }
+ }
+ 
+ content::RenderWidgetHostView* ThumbnailTabHelper::GetView() {
+@@ -307,9 +333,16 @@ void ThumbnailTabHelper::StoreThumbnail(CaptureType type,
  }
  
  void ThumbnailTabHelper::ClearData() {
@@ -363,11 +420,11 @@
 +}
 +
  void ThumbnailTabHelper::StartVideoCapture() {
-   content::RenderWidgetHostView* const source_view = state_->GetView();
+   content::RenderWidgetHostView* const source_view = GetView();
    if (!source_view) {
-@@ -457,3 +489,14 @@ void ThumbnailTabHelper::DidStartNavigat
-     content::NavigationHandle* navigation_handle) {
-   is_tab_discarded_ = false;
+@@ -400,3 +433,13 @@ ThumbnailCaptureInfo ThumbnailTabHelper::GetInitialCaptureInfo(
+ 
+   return capture_info;
  }
 +
 +void ThumbnailTabHelper::DidFirstVisuallyNonEmptyPaint() {
@@ -379,55 +436,91 @@
 +    CaptureThumbnailForPreview();
 +  }
 +}
-+
+diff --git a/chrome/browser/ui/thumbnails/thumbnail_tab_helper.h b/chrome/browser/ui/thumbnails/thumbnail_tab_helper.h
+index dfac275..e43d9ee 100644
 --- a/chrome/browser/ui/thumbnails/thumbnail_tab_helper.h
 +++ b/chrome/browser/ui/thumbnails/thumbnail_tab_helper.h
-@@ -12,6 +12,7 @@
- #include "base/time/time.h"
+@@ -16,6 +16,7 @@
  #include "chrome/browser/ui/thumbnails/thumbnail_capture_info.h"
  #include "chrome/browser/ui/thumbnails/thumbnail_image.h"
+ #include "chrome/browser/ui/thumbnails/thumbnail_readiness_tracker.h"
 +#include "components/prefs/pref_change_registrar.h"
- #include "content/public/browser/navigation_handle.h"
  #include "content/public/browser/render_widget_host_view.h"
  #include "content/public/browser/web_contents_observer.h"
-@@ -51,6 +52,8 @@ class ThumbnailTabHelper : public conten
+ #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
+@@ -53,6 +54,8 @@ class ThumbnailTabHelper : public content::WebContentsObserver,
    // active tab.
    void CaptureThumbnailOnTabBackgrounded();
  
 +  void CaptureThumbnailForPreview();
 +
   private:
-   class TabStateTracker;
+   using CaptureReadiness = ThumbnailImage::CaptureReadiness;
  
-@@ -78,6 +81,8 @@ class ThumbnailTabHelper : public conten
+@@ -67,6 +70,8 @@ class ThumbnailTabHelper : public content::WebContentsObserver,
+ 
+   // content::WebContentsObserver:
+   void RenderViewReady() override;
++  void DidFirstVisuallyNonEmptyPaint() override;
++  void OnVisibilityChanged(content::Visibility visibility) override;
+   void PrimaryMainFrameRenderProcessGone(
+       base::TerminationStatus status) override;
+   void AboutToBeDiscarded(content::WebContents* new_contents) override;
+@@ -100,6 +105,8 @@ class ThumbnailTabHelper : public content::WebContentsObserver,
    // Clears the data associated to the currently set thumbnail. For when the
    // thumbnail is no longer valid.
    void ClearData();
 +  void UpdatePreviewCaching();
 +  void CaptureThumbnail();
  
-   // viz::mojom::FrameSinkVideoConsumer:
- 
-@@ -96,6 +101,8 @@ class ThumbnailTabHelper : public conten
- 
-   void DidStartNavigation(
-       content::NavigationHandle* navigation_handle) override;
-+  void DidFirstVisuallyNonEmptyPaint() override;
-+  void OnVisibilityChanged(content::Visibility visibility) override;
- 
-   // Copy info from the most recent frame we have captured.
-   ThumbnailCaptureInfo last_frame_capture_info_;
-@@ -110,6 +117,7 @@ class ThumbnailTabHelper : public conten
+   // Returns the dimensions of the multipurpose thumbnail that should be
+   // captured from an entire webpage. Can be cropped or compressed later.
+@@ -132,6 +139,7 @@ class ThumbnailTabHelper : public content::WebContentsObserver,
  
    // The thumbnail maintained by this instance.
    scoped_refptr<ThumbnailImage> thumbnail_;
 +  PrefChangeRegistrar pref_change_registrar_;
  
-   bool is_tab_discarded_ = false;
+   ui::ScopedUnownedUserData<ThumbnailTabHelper> scoped_unowned_user_data_;
  
+diff --git a/chrome/browser/ui/views/frame/BUILD.gn b/chrome/browser/ui/views/frame/BUILD.gn
+index 76b7d83..c1c2453 100644
+--- a/chrome/browser/ui/views/frame/BUILD.gn
++++ b/chrome/browser/ui/views/frame/BUILD.gn
+@@ -756,7 +756,11 @@ source_set("browser_view_header") {
+ }
+ 
+ source_set("browser_view") {
+-  sources = [ "browser_view.cc" ]
++  sources = [
++    "../tabs/visual_tab_switcher.cc",
++    "../tabs/visual_tab_switcher.h",
++    "browser_view.cc",
++  ]
+   public_deps = [ ":browser_view_header" ]
+   deps = [
+     ":app_menu_button",
+@@ -828,6 +832,7 @@ source_set("browser_view") {
+     "//chrome/browser/ui:layout_constants",
+     "//chrome/browser/ui:recently_audible_helper",
+     "//chrome/browser/ui:sad_tab",
++    "//chrome/browser/ui:tab_ui_helper",
+     "//chrome/browser/ui:ui_controller_factory",
+     "//chrome/browser/ui:ui_features",
+     "//chrome/browser/ui:unload_controller",
+@@ -869,6 +874,7 @@ source_set("browser_view") {
+     "//chrome/browser/ui/tabs/organizer",
+     "//chrome/browser/ui/tabs/saved_tab_groups",
+     "//chrome/browser/ui/tabs/tab_strip_api",
++    "//chrome/browser/ui/thumbnails",
+     "//chrome/browser/ui/toolbar",
+     "//chrome/browser/ui/toolbar/chrome_labs",
+     "//chrome/browser/ui/user_education",
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+index 13fa215..80fdd68 100644
 --- a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
 +++ b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
-@@ -64,11 +64,13 @@
+@@ -67,6 +67,7 @@
  #include "components/web_modal/web_contents_modal_dialog_host.h"
  #include "ui/accessibility/platform/ax_platform_node.h"
  #include "ui/actions/actions.h"
@@ -435,13 +528,15 @@
  #include "ui/base/accelerators/global_accelerator_listener/global_accelerator_listener.h"
  #import "ui/base/cocoa/window_size_constants.h"
  #include "ui/base/l10n/l10n_util.h"
- #include "ui/base/mojom/window_show_state.mojom.h"
+@@ -74,6 +75,7 @@
+ #include "ui/base/ui_base_features.h"
  #include "ui/base/window_open_disposition.h"
+ #include "ui/compositor/compositor.h"
 +#include "ui/events/keycodes/keyboard_code_conversion_mac.h"
+ #include "ui/gfx/color_utils.h"
+ #include "ui/native_theme/native_theme.h"
  #import "ui/views/cocoa/native_widget_mac_ns_window_host.h"
- #include "ui/views/interaction/element_tracker_views.h"
- 
-@@ -535,6 +537,15 @@ bool BrowserNativeWidgetMac::ExecuteComm
+@@ -666,6 +668,15 @@ bool BrowserNativeWidgetMac::ExecuteCommand(
  
    BrowserWindowInterface* browser = browser_view_->browser();
  
@@ -457,9 +552,11 @@
    if (command == IDC_TOGGLE_VERTICAL_TABS) {
      if (auto* controller =
              tabs::VerticalTabStripStateController::From(browser)) {
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index f877f63..f0d78dc 100644
 --- a/chrome/browser/ui/views/frame/browser_view.cc
 +++ b/chrome/browser/ui/views/frame/browser_view.cc
-@@ -229,6 +229,7 @@
+@@ -233,6 +233,7 @@
  #include "chrome/browser/ui/views/tabs/tab/tab_accessibility.h"
  #include "chrome/browser/ui/views/tabs/tab_strip.h"
  #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_top_container.h"
@@ -467,7 +564,7 @@
  #include "chrome/browser/ui/views/theme_copying_widget.h"
  #include "chrome/browser/ui/views/toolbar/app_menu_control.h"
  #include "chrome/browser/ui/views/toolbar/avatar_toolbar_button_interface.h"
-@@ -1214,6 +1215,7 @@ BrowserView::BrowserView(BrowserWindowIn
+@@ -1233,6 +1234,7 @@ BrowserView::BrowserView(BrowserWindowInterface* browser)
  }
  
  BrowserView::~BrowserView() {
@@ -475,7 +572,7 @@
    if (browser_shortcut_service_) {
      browser_shortcut_service_->RemoveObserver(this);
      browser_shortcut_service_ = nullptr;
-@@ -5972,6 +5974,26 @@ const views::View* BrowserView::GetViewB
+@@ -6059,6 +6061,26 @@ const views::View* BrowserView::GetViewByElementId(
  ///////////////////////////////////////////////////////////////////////////////
  // BrowserView, ui::AcceleratorTarget overrides:
  
@@ -500,9 +597,9 @@
 +}
 +
  bool BrowserView::AcceleratorPressed(const ui::Accelerator& accelerator) {
-   NativeWebKeyboardEvent native_event(accelerator.ToKeyEvent());
-   if (ExclusiveAccessManager::From(browser_)->HandleUserKeyEvent(
-@@ -5986,6 +6008,10 @@ bool BrowserView::AcceleratorPressed(con
+ #if BUILDFLAG(IS_MAC)
+   // Forward accelerators to ExclusiveAccessManager to handle Esc press-and-hold
+@@ -6077,6 +6099,10 @@ bool BrowserView::AcceleratorPressed(const ui::Accelerator& accelerator) {
      return false;
    }
  
@@ -513,9 +610,11 @@
    UpdateAcceleratorMetrics(accelerator, command_id);
  
    if (command_id == IDC_CLEAR_BROWSING_DATA) {
+diff --git a/chrome/browser/ui/views/frame/browser_view.h b/chrome/browser/ui/views/frame/browser_view.h
+index 5910143..afb7f32 100644
 --- a/chrome/browser/ui/views/frame/browser_view.h
 +++ b/chrome/browser/ui/views/frame/browser_view.h
-@@ -106,6 +106,7 @@ class TopContainerView;
+@@ -110,6 +110,7 @@ class TopContainerView;
  class TopControlsSlideController;
  class TopControlsSlideControllerTest;
  class VerticalTabStripRegionView;
@@ -523,7 +622,7 @@
  class WebAppFrameToolbarView;
  
  namespace gfx {
-@@ -606,6 +607,8 @@ class BrowserView : public BrowserWindow
+@@ -615,6 +616,8 @@ class BrowserView : public BrowserWindow,
    void ShowChromeLabs() override;
    BrowserView* AsBrowserView() override;
    void ShowUpdateChromeDialog() override;
@@ -532,7 +631,7 @@
    void StartTabCycling();
    void StopTabCycling();
    void ShowIntentPickerBubble(
-@@ -1489,6 +1492,7 @@ class BrowserView : public BrowserWindow
+@@ -1497,6 +1500,7 @@ class BrowserView : public BrowserWindow,
        tab_strip_web_apps_reparented_state_;
  
    std::unique_ptr<TabCyclingEventHandler> tab_cycling_event_handler_;
@@ -540,6 +639,9 @@
  
    // Zen mode state.
    std::unique_ptr<views::EventMonitor> zen_mode_event_monitor_;
+diff --git a/chrome/browser/ui/views/tabs/visual_tab_switcher.cc b/chrome/browser/ui/views/tabs/visual_tab_switcher.cc
+new file mode 100644
+index 0000000..36824e5
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/visual_tab_switcher.cc
 @@ -0,0 +1,568 @@
@@ -1111,6 +1213,9 @@
 +    Close(false);
 +  }
 +}
+diff --git a/chrome/browser/ui/views/tabs/visual_tab_switcher.h b/chrome/browser/ui/views/tabs/visual_tab_switcher.h
+new file mode 100644
+index 0000000..247fef8
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/visual_tab_switcher.h
 @@ -0,0 +1,102 @@
@@ -1216,37 +1321,3 @@
 +};
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_TABS_VISUAL_TAB_SWITCHER_H_
---- a/chrome/browser/global_keyboard_shortcuts_mac.h
-+++ b/chrome/browser/global_keyboard_shortcuts_mac.h
-@@ -9,6 +9,7 @@
- 
- #include <vector>
- 
-+#include "base/apple/owned_objc.h"
- #include "ui/base/accelerators/accelerator.h"
- 
- #if defined(__OBJC__)
-@@ -43,6 +44,9 @@ struct CommandForKeyEventResult {
-   bool from_main_menu;
- };
- 
-+CommandForKeyEventResult CommandForKeyEvent(
-+    const base::apple::OwnedNSEvent& event);
-+
- #if defined(__OBJC__)
- 
- // macOS applications are supposed to put all keyEquivalents [hotkeys] in the
---- a/chrome/browser/global_keyboard_shortcuts_mac.mm
-+++ b/chrome/browser/global_keyboard_shortcuts_mac.mm
-@@ -223,6 +223,11 @@ const std::vector<NSMenuItem*>& GetMenuI
-   return *menu_items;
- }
- 
-+CommandForKeyEventResult CommandForKeyEvent(
-+    const base::apple::OwnedNSEvent& event) {
-+  return event ? CommandForKeyEvent(event.Get()) : NoCommand();
-+}
-+
- CommandForKeyEventResult CommandForKeyEvent(NSEvent* event) {
-   DCHECK(event);
-   if ([event type] != NSEventTypeKeyDown)
