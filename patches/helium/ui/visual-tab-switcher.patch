@@ -641,10 +641,10 @@ index 5910143..afb7f32 100644
    std::unique_ptr<views::EventMonitor> zen_mode_event_monitor_;
 diff --git a/chrome/browser/ui/views/tabs/visual_tab_switcher.cc b/chrome/browser/ui/views/tabs/visual_tab_switcher.cc
 new file mode 100644
-index 0000000..36824e5
+index 0000000..c288ef7
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/visual_tab_switcher.cc
-@@ -0,0 +1,568 @@
+@@ -0,0 +1,569 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -713,7 +713,6 @@ index 0000000..36824e5
 +constexpr int kStripHeight = 230;
 +constexpr int kSelectionCornerRadius = 4;
 +constexpr base::TimeDelta kRevealDelay = base::Milliseconds(250);
-+constexpr int kDefaultMaxTabs = 5;
 +
 +class SwitcherContents : public views::View {
 +  METADATA_HEADER(SwitcherContents, views::View)
@@ -787,7 +786,7 @@ index 0000000..36824e5
 +        prefs::kTabCyclingMRU);
 +    list_mode_ = browser_view_->GetProfile()->GetPrefs()->GetBoolean(
 +        prefs::kVisualTabSwitcherList);
-+    int max_tabs = kDefaultMaxTabs;
++    int max_tabs = -1;
 +    int configured_max_tabs;
 +    if (base::StringToInt(
 +            base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
@@ -843,6 +842,7 @@ index 0000000..36824e5
 +        {ui::EventType::kKeyReleased, ui::EventType::kKeyPressed,
 +         ui::EventType::kMousePressed});
 +  }
++  const size_t previous = selected_;
 +  selected_ = reverse ? (selected_ + tabs_.size() - 1) % tabs_.size()
 +                      : (selected_ + 1) % tabs_.size();
 +  if (starting) {
@@ -853,7 +853,7 @@ index 0000000..36824e5
 +    reveal_timer_.Stop();
 +    Show();
 +  } else {
-+    UpdateSelection();
++    UpdateSelection(previous);
 +  }
 +  return true;
 +}
@@ -944,6 +944,7 @@ index 0000000..36824e5
 +    button->SetFocusBehavior(views::View::FocusBehavior::ACCESSIBLE_ONLY);
 +    button->GetViewAccessibility().SetRole(ax::mojom::Role::kListBoxOption);
 +    button->GetViewAccessibility().SetName(GetTabTitle(tabs_[i]));
++    button->GetViewAccessibility().SetIsSelected(false);
 +    buttons_.push_back(button);
 +  }
 +  if (!list_mode_) {
@@ -995,18 +996,18 @@ index 0000000..36824e5
 +  UpdateSelection();
 +}
 +
-+void VisualTabSwitcher::UpdateSelection() {
-+  for (size_t i = 0; i < buttons_.size(); ++i) {
-+    buttons_[i]->SetBackground(
-+        i == selected_
-+            ? views::CreateRoundedRectBackground(ui::kColorSysPrimaryContainer,
-+                                                 kSelectionCornerRadius)
-+            : nullptr);
-+    buttons_[i]->GetViewAccessibility().SetIsSelected(i == selected_);
++void VisualTabSwitcher::UpdateSelection(std::optional<size_t> previous) {
++  if (previous && *previous != selected_) {
++    buttons_[*previous]->SetBackground(nullptr);
++    buttons_[*previous]->GetViewAccessibility().SetIsSelected(false);
 +  }
-+  contents_->GetViewAccessibility().SetActiveDescendant(*buttons_[selected_]);
++  auto* selected_button = buttons_[selected_].get();
++  selected_button->SetBackground(views::CreateRoundedRectBackground(
++      ui::kColorSysPrimaryContainer, kSelectionCornerRadius));
++  selected_button->GetViewAccessibility().SetIsSelected(true);
++  contents_->GetViewAccessibility().SetActiveDescendant(*selected_button);
 +  title_->SetText(GetTabTitle(tabs_[selected_]));
-+  buttons_[selected_]->ScrollViewToVisible();
++  selected_button->ScrollViewToVisible();
 +  if (preview_) {
 +    subscriptions_.clear();
 +    preview_->SetImage(ui::ImageModel());
@@ -1215,7 +1216,7 @@ index 0000000..36824e5
 +}
 diff --git a/chrome/browser/ui/views/tabs/visual_tab_switcher.h b/chrome/browser/ui/views/tabs/visual_tab_switcher.h
 new file mode 100644
-index 0000000..247fef8
+index 0000000..78f5662
 --- /dev/null
 +++ b/chrome/browser/ui/views/tabs/visual_tab_switcher.h
 @@ -0,0 +1,102 @@
@@ -1273,7 +1274,7 @@ index 0000000..247fef8
 +
 + private:
 +  void Show();
-+  void UpdateSelection();
++  void UpdateSelection(std::optional<size_t> previous = std::nullopt);
 +  void UpdateVisibleThumbnails();
 +  void AcceptTab(size_t index);
 +  std::unique_ptr<ThumbnailImage::Subscription> Subscribe(
