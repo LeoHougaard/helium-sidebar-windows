@@ -661,7 +661,7 @@ index 0000000..36824e5
 +#include "base/task/single_thread_task_runner.h"
 +#include "build/build_config.h"
 +#include "chrome/browser/profiles/profile.h"
-+#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/tab_ui_helper.h"
 +#include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
 +#include "chrome/browser/ui/views/frame/browser_view.h"
@@ -782,7 +782,7 @@ index 0000000..36824e5
 +bool VisualTabSwitcher::Cycle(bool reverse) {
 +  const bool starting = tabs_.empty();
 +  if (starting) {
-+    auto* model = browser_view_->browser()->tab_strip_model();
++    auto* model = browser_view_->browser()->GetTabStripModel();
 +    const bool mru = browser_view_->GetProfile()->GetPrefs()->GetBoolean(
 +        prefs::kTabCyclingMRU);
 +    list_mode_ = browser_view_->GetProfile()->GetPrefs()->GetBoolean(
@@ -1035,7 +1035,7 @@ index 0000000..36824e5
 +std::unique_ptr<ThumbnailImage::Subscription> VisualTabSwitcher::Subscribe(
 +    views::ImageView* image,
 +    content::WebContents* contents) {
-+  auto* model = browser_view_->browser()->tab_strip_model();
++  auto* model = browser_view_->browser()->GetTabStripModel();
 +  auto* tab = model->GetTabForWebContents(contents);
 +  auto* helper = tab ? ThumbnailTabHelper::From(tab) : nullptr;
 +  if (!helper) {
