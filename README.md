@@ -2,7 +2,17 @@
 
 This personal Helium build adds the PR #2367 sidebar, a compact row for navigation and Windows controls, and a recent-tab Ctrl+Tab switcher.
 
-Download the portable ZIP from [Releases](../../releases), extract it, and run **Open Helium PR 2367.cmd**. The launcher uses a separate browser profile. The build targets Windows x64 and is based on Helium 0.22.2.1. Updates require a new custom build.
+### Install and update on Windows
+
+1. Sign in to GitHub and download **Helium-Sidebar-Setup.zip** from the [latest release](https://github.com/LeoHougaard/helium-sidebar-windows/releases/latest).
+2. Extract the setup ZIP and run **Install Helium Sidebar.cmd**. Setup installs GitHub CLI if needed and opens GitHub sign-in if you are signed out. Use the account that can access this private repository.
+3. Open **Helium Sidebar** from the Windows Start menu. Run **Update Helium Sidebar** from Start whenever you want the latest published custom build. Close and reopen the browser to switch to an installed update.
+
+Setup verifies each Windows x64 package against its GitHub release digest. The Start menu launcher uses the same separate compact-build browser profile as the portable ZIP, so its tabs and settings carry over on the same computer. The official Helium installation uses its own profile and updater.
+
+The release also has the full portable ZIP. To use it directly, extract it and run **Open Helium PR 2367.cmd**.
+
+This layout moves native browser controls. Each upstream version still needs a compatible custom build and a new release here. Setup downloads those releases without compiling Helium on the destination PC.
 
 Clone with submodules to get the Windows patches and the pinned browser source.
 
