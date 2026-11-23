@@ -1,5 +1,55 @@
+diff --git a/chrome/browser/ui/views/frame/BUILD.gn b/chrome/browser/ui/views/frame/BUILD.gn
+index c1c2453..07f58fd 100644
+--- a/chrome/browser/ui/views/frame/BUILD.gn
++++ b/chrome/browser/ui/views/frame/BUILD.gn
+@@ -1830,6 +1830,7 @@ if (is_win) {
+       "//skia",
+       "//ui/base",
+       "//ui/base:features",
++      "//ui/compositor",
+       "//ui/display",
+       "//ui/gfx",
+       "//ui/strings:ui_strings",
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.cc b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+index a1e207b..83449e3 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.cc
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+@@ -45,6 +45,7 @@
+ #include "ui/base/theme_provider.h"
+ #include "ui/base/ui_base_features.h"
+ #include "ui/base/win/hwnd_metrics.h"
++#include "ui/compositor/layer.h"
+ #include "ui/color/color_provider_key.h"
+ #include "ui/display/win/dpi.h"
+ #include "ui/display/win/screen_win.h"
+@@ -408,10 +409,22 @@ void BrowserFrameViewWin::UpdateWindowTitle() {
+   }
+ }
+ 
+-void BrowserFrameViewWin::SetCaptionButtonsOpacity(float) {
++void BrowserFrameViewWin::SetCaptionButtonsOpacity(float opacity) {
++  auto* browser_view = GetBrowserView();
+   caption_button_container_->SetCaptionButtonsCanProcessEvents(
+-      !GetBrowserView()->IsZenModeEnabledForLayout() ||
+-      GetBrowserView()->GetTopChromeRevealRatio() > 0.0f);
++      !browser_view->IsZenModeEnabledForLayout() || opacity > 0.0f);
++  if (browser_view->HasFloatingZenModeTopChrome()) {
++    // The frame paints after the client view, so keeping the caption in its
++    // own layer puts its buttons above the floating toolbar layer.
++    if (!caption_button_container_->layer()) {
++      caption_button_container_->SetPaintToLayer();
++      caption_button_container_->layer()->SetFillsBoundsOpaquely(false);
++    }
++    caption_button_container_->layer()->SetOpacity(opacity);
++  } else if (!browser_view->IsWindowControlsOverlayEnabled() &&
++             caption_button_container_->layer()) {
++    caption_button_container_->DestroyLayer();
++  }
+ }
+ 
+ void BrowserFrameViewWin::ResetWindowControls() {
 diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
-index f0d78dc..cf68fed 100644
+index f0d78dc..bca691d 100644
 --- a/chrome/browser/ui/views/frame/browser_view.cc
 +++ b/chrome/browser/ui/views/frame/browser_view.cc
 @@ -1758,6 +1758,11 @@ bool BrowserView::IsZenModeTopChromePinned() const {
@@ -42,7 +92,7 @@ index f0d78dc..cf68fed 100644
    chrome::BrowserCommandController::From(browser_)->UpdateCommandEnabled(
        IDC_TOGGLE_ZEN_MODE_TOP_CHROME_PIN, zen_mode_enabled);
  
-@@ -1999,6 +2007,25 @@ void BrowserView::UpdateZenModeState() {
+@@ -1999,6 +2007,28 @@ void BrowserView::UpdateZenModeState() {
    }
  }
  
@@ -62,13 +112,16 @@ index f0d78dc..cf68fed 100644
 +  } else if (top_container_ && top_container_->parent() == this) {
 +    top_container_->DestroyLayer();
 +  }
++  if (auto* frame_view = GetFrameView()) {
++    frame_view->SetCaptionButtonsOpacity(GetTopChromeRevealRatio());
++  }
 +  ReorderLayers();
 +}
 +
  void BrowserView::UpdateZenModeEventMonitor() {
    if (!GetWidget() || !IsZenModeEnabled()) {
      zen_mode_event_monitor_.reset();
-@@ -5614,6 +5641,25 @@ gfx::Size BrowserView::GetMinimumSize() const {
+@@ -5614,6 +5644,25 @@ gfx::Size BrowserView::GetMinimumSize() const {
  ///////////////////////////////////////////////////////////////////////////////
  // BrowserView, views::View overrides:
  
@@ -227,3 +280,23 @@ index 80b85ef..d13303e 100644
           (!browser_view.IsZenModeEnabledForLayout() ||
            browser_view.GetTopChromeRevealRatio() >=
                kZenTopChromeAttachedThreshold);
+diff --git a/chrome/browser/ui/views/frame/opaque_browser_frame_view.cc b/chrome/browser/ui/views/frame/opaque_browser_frame_view.cc
+index de30f86..0172317 100644
+--- a/chrome/browser/ui/views/frame/opaque_browser_frame_view.cc
++++ b/chrome/browser/ui/views/frame/opaque_browser_frame_view.cc
+@@ -537,12 +537,13 @@ bool OpaqueBrowserFrameView::ShouldShowCaptionButtons() const {
+ }
+ 
+ void OpaqueBrowserFrameView::SetCaptionButtonsOpacity(float opacity) {
+-  auto apply = [opacity](views::Button* view) {
++  const bool floating = GetBrowserView()->HasFloatingZenModeTopChrome();
++  auto apply = [opacity, floating](views::Button* view) {
+     if (!view) {
+       return;
+     }
+     view->SetCanProcessEventsWithinSubtree(opacity > 0.0f);
+-    if (opacity < 1.0f) {
++    if (opacity < 1.0f || floating) {
+       if (!view->layer()) {
+         view->SetPaintToLayer();
+         view->layer()->SetFillsBoundsOpaquely(false);
