@@ -64,7 +64,17 @@ index f0d78dc..bca691d 100644
  void BrowserView::ToggleZenModeSideChrome() {
    if (!IsZenModeEnabled() || !ShouldDrawVerticalTabStrip()) {
      return;
-@@ -1896,6 +1901,7 @@ void BrowserView::OnZenModeTopChromePinnedPrefChanged() {
+@@ -1826,8 +1831,9 @@ void BrowserView::OnVerticalTabStripModeChanged(
+     vertical_tab_strip_region_view_->ResetTabStrip();
+     horizontal_tab_strip_region_view_->InitializeTabStrip();
+   }
+   UpdateZenModeTabStripCollapse();
++  UpdateZenModeTopChromeLayer();
+ 
+   GetFrameView()->OnTabStripStateChanged();
+ 
+   UpdateTabSearchBubbleHost();
+@@ -1896,6 +1902,7 @@ void BrowserView::OnZenModeTopChromePinnedPrefChanged() {
      return;
    }
  
@@ -72,7 +82,7 @@ index f0d78dc..bca691d 100644
    const bool top_chrome_pinned = IsZenModeTopChromePinned();
    if (top_chrome_pinned) {
      RevealZenModeTopChromeImmediately();
-@@ -1953,7 +1959,10 @@ void BrowserView::UpdateZenModeState() {
+@@ -1953,7 +1960,10 @@ void BrowserView::UpdateZenModeState() {
    const bool zen_mode_enabled = IsZenModeEnabled();
    UpdateZenModeEventMonitor();
  
@@ -84,7 +94,7 @@ index f0d78dc..bca691d 100644
      if (zen_mode_enabled_) {
        UpdateZenModeRevealFromCursor();
      }
-@@ -1961,7 +1970,6 @@ void BrowserView::UpdateZenModeState() {
+@@ -1961,7 +1971,6 @@ void BrowserView::UpdateZenModeState() {
      return;
    }
  
@@ -92,7 +102,7 @@ index f0d78dc..bca691d 100644
    chrome::BrowserCommandController::From(browser_)->UpdateCommandEnabled(
        IDC_TOGGLE_ZEN_MODE_TOP_CHROME_PIN, zen_mode_enabled);
  
-@@ -1999,6 +2007,28 @@ void BrowserView::UpdateZenModeState() {
+@@ -1999,6 +2008,28 @@ void BrowserView::UpdateZenModeState() {
    }
  }
  
@@ -121,7 +131,7 @@ index f0d78dc..bca691d 100644
  void BrowserView::UpdateZenModeEventMonitor() {
    if (!GetWidget() || !IsZenModeEnabled()) {
      zen_mode_event_monitor_.reset();
-@@ -5614,6 +5644,25 @@ gfx::Size BrowserView::GetMinimumSize() const {
+@@ -5614,6 +5645,25 @@ gfx::Size BrowserView::GetMinimumSize() const {
  ///////////////////////////////////////////////////////////////////////////////
  // BrowserView, views::View overrides:
  
@@ -147,6 +157,19 @@ index f0d78dc..bca691d 100644
  void BrowserView::Layout(PassKey) {
    TRACE_EVENT0("ui", "BrowserView::Layout");
    // Do not perform layout if the view is not yet initialized, in fullscreen
+@@ -5975,9 +6025,12 @@ void BrowserView::AddedToWidget() {
+     } else {
+       horizontal_tab_strip_region_view_->InitializeTabStrip();
+     }
+   }
+ 
++  // The floating toolbar depends on the active tab strip being initialized.
++  UpdateZenModeTopChromeLayer();
++
+   dialog_anchor_ = std::make_unique<views::ViewSubregionAnchor>(
+       kBrowserDialogAnchorElementId, *this);
+ 
+   initialized_ = true;
 diff --git a/chrome/browser/ui/views/frame/browser_view.h b/chrome/browser/ui/views/frame/browser_view.h
 index afb7f32..32bda9c 100644
 --- a/chrome/browser/ui/views/frame/browser_view.h
