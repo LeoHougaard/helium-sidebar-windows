@@ -12,7 +12,15 @@ Setup verifies each Windows x64 package against its GitHub release digest. The S
 
 The release also has the full portable ZIP. To use it directly, extract it and run **Open Helium PR 2367.cmd**.
 
-This layout moves native browser controls. Each upstream version still needs a compatible custom build and a new release here. Setup downloads those releases without compiling Helium on the destination PC.
+### Publish an update from GitHub
+
+1. Open [Actions → Release Helium Sidebar](https://github.com/LeoHougaard/helium-sidebar-windows/actions/workflows/sidebar-release.yml) and click **Run workflow** on `main`.
+2. Choose **Publish the prepared draft** to test and publish an existing draft. Leave **Draft tag** blank if there is only one sidebar draft. Choose **Build and publish** to compile from source when a Windows builder is configured. **Test the current public release** runs the Windows checks without publishing.
+3. After the workflow succeeds, run **Update Helium Sidebar** to check immediately or let the launcher check in the background. Close all Helium Sidebar windows and open it again to use the update.
+
+The current and previous application folders are retained. Older inactive folders are cleaned up after updates. If you installed with an earlier setup, run the latest setup once to get this cleanup. A fix for the same Helium version uses a higher revision tag, for example `0.22.2.1-sidebar-compact-r2`.
+
+For a prepared draft, attach one `Helium-Sidebar-Compact-*-Windows-x64.zip` built from the release's source commit. To build in Actions, set the `HELIUM_SIDEBAR_BUILDER` Actions variable to the label of a dedicated Windows x64 runner with Python-compatible tooling, 7-Zip, Visual Studio and the Windows SDK. A full Chromium build needs substantial disk space. Once the builder is configured, **Build and publish** compiles the pinned source on `main`, runs a Windows startup check, then publishes the verified package and installer. When official Helium ships a new version, the source pin and sidebar patches must first be updated on `main`.
 
 Clone with submodules to get the Windows patches and the pinned browser source.
 

@@ -14,15 +14,47 @@ $repository = 'LeoHougaard/helium-sidebar-windows'
 $install = Join-Path $env:LOCALAPPDATA 'Helium Sidebar Compact'
 $versions = Join-Path $install 'Versions'
 $selection = Join-Path $install 'Current.txt'
+$previousSelection = Join-Path $install 'Previous.txt'
 $lastCheck = Join-Path $install 'Last Update Check'
 $updateLog = Join-Path $install 'Update.log'
 $profile = Join-Path $env:LOCALAPPDATA 'Helium PR 2367 Compact\User Data'
 
-function Get-BrowserFolder([string]$tag) {
-    if ($tag -notmatch '^[0-9][a-zA-Z0-9.-]{0,79}$' -or $tag.EndsWith('.')) {
+$releaseTagPattern = '^(?<version>[0-9]{1,5}(?:\.[0-9]{1,5}){3})-sidebar-compact(?:-r(?<revision>[1-9][0-9]{0,8}))?$'
+
+function Get-ReleaseVersion([string]$tag) {
+    if ($tag -notmatch $releaseTagPattern) {
         throw "Invalid release tag '$tag'."
     }
+    [version]$Matches.version
+}
+
+function Get-BrowserFolder([string]$tag) {
+    $null = Get-ReleaseVersion $tag
     Join-Path $versions $tag
+}
+
+function Remove-OldVersions([string]$current) {
+    $root = Get-Item -LiteralPath $versions
+    if ($root.Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
+
+    $keep = @($current)
+    if (Test-Path -LiteralPath $previousSelection -PathType Leaf) {
+        $keep += (Get-Content -LiteralPath $previousSelection -Raw).Trim()
+    }
+    $running = @(Get-Process -Name chrome -ErrorAction SilentlyContinue | ForEach-Object Path)
+    foreach ($folder in Get-ChildItem -LiteralPath $root.FullName -Directory) {
+        if ($folder.Name -notmatch $releaseTagPattern -or $folder.Name -in $keep -or
+            ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+        $path = (Resolve-Path -LiteralPath $folder.FullName).ProviderPath
+        if ((Split-Path -Parent $path) -ne $root.FullName) { continue }
+        if ($running | Where-Object { $_ -and $_.StartsWith($path + '\', [StringComparison]::OrdinalIgnoreCase) }) { continue }
+        if (Get-ChildItem -LiteralPath $path -Recurse -Force -Attributes ReparsePoint | Select-Object -First 1) { continue }
+        try {
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+        } catch {
+            Add-Content -LiteralPath $updateLog -Value "$(Get-Date -Format s) Could not remove $($folder.Name): $($_.Exception.Message)" -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 if ($Launch) {
@@ -64,12 +96,21 @@ try {
     }
     $asset = $assets[0]
     $browser = Get-BrowserFolder $release.tag_name
-    if ($Automatic) {
-        $current = (Get-Content -LiteralPath $selection -Raw).Trim()
-        if ($current -eq $release.tag_name) { return }
-        $installedVersion = [version]($current -split '-', 2)[0]
-        $availableVersion = [version]($release.tag_name -split '-', 2)[0]
-        if ($availableVersion -lt $installedVersion) { return }
+    $current = if (Test-Path -LiteralPath $selection -PathType Leaf) { (Get-Content -LiteralPath $selection -Raw).Trim() }
+    if ($current) {
+        $installedVersion = Get-ReleaseVersion $current
+        $availableVersion = Get-ReleaseVersion $release.tag_name
+        $installedRevision = if ($current -match '-r(\d+)$') { [int]$Matches[1] } else { 0 }
+        $availableRevision = if ($release.tag_name -match '-r(\d+)$') { [int]$Matches[1] } else { 0 }
+        if ($availableVersion -lt $installedVersion -or
+            ($availableVersion -eq $installedVersion -and $availableRevision -lt $installedRevision)) {
+            if ($Automatic) { return }
+            throw 'The latest published release is older than your installed version.'
+        }
+        if ($Automatic -and $current -eq $release.tag_name) {
+            Remove-OldVersions $current
+            return
+        }
     }
     if (!(Test-Path -LiteralPath (Join-Path $browser 'chrome.exe') -PathType Leaf)) {
         if (!$Automatic) { Write-Host "Downloading Helium Sidebar $($release.tag_name)." }
@@ -95,12 +136,12 @@ try {
 
     $helper = Join-Path $install 'Helium Sidebar.ps1'
     if ($PSCommandPath -ne $helper) { Copy-Item -LiteralPath $PSCommandPath -Destination $helper }
-    $next = Join-Path $install 'Current.next'
-    [IO.File]::WriteAllText($next, $release.tag_name)
-    if (Test-Path -LiteralPath $selection) { [IO.File]::Replace($next, $selection, [NullString]::Value) }
-    else { [IO.File]::Move($next, $selection) }
-
-    if ($Automatic) { return }
+    if ($current -ne $release.tag_name) {
+        $next = Join-Path $install 'Current.next'
+        [IO.File]::WriteAllText($next, $release.tag_name)
+        if ($current) { [IO.File]::Replace($next, $selection, $previousSelection) }
+        else { [IO.File]::Move($next, $selection) }
+    }
 
     $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
     New-Item -ItemType Directory -Force -Path $programs | Out-Null
@@ -117,8 +158,11 @@ try {
         $shortcut.WindowStyle = $action.Style
         $shortcut.Save()
     }
-    Write-Host "Helium Sidebar $($release.tag_name) is ready. Open Helium Sidebar from Start."
-    Write-Host 'If Helium Sidebar is already open, close and reopen it to use a newly installed version.'
+    Remove-OldVersions $release.tag_name
+    if (!$Automatic) {
+        Write-Host "Helium Sidebar $($release.tag_name) is ready. Open Helium Sidebar from Start."
+        Write-Host 'If Helium Sidebar is already open, close and reopen it to use a newly installed version.'
+    }
 } finally {
     if ($stage) {
         $stagePath = [IO.Path]::GetFullPath($stage)

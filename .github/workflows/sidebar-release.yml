@@ -1,0 +1,168 @@
+name: Release Helium Sidebar
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What should GitHub do?
+        type: choice
+        options:
+          - Test the current public release
+          - Publish the prepared draft
+          - Build and publish
+        default: Test the current public release
+      draft_tag:
+        description: Draft tag (leave blank if there is only one sidebar draft)
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helium-sidebar-release
+  cancel-in-progress: false
+
+jobs:
+  check-builder:
+    if: github.ref == 'refs/heads/main' && inputs.action == 'Build and publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check that a Windows builder is configured
+        env:
+          BUILDER: ${{ vars.HELIUM_SIDEBAR_BUILDER }}
+        run: |
+          if [ -z "$BUILDER" ]; then
+            echo '::error::A Windows build runner is not configured. Choose Publish the prepared draft to release a browser package that has already been built.'
+            exit 1
+          fi
+
+  build:
+    needs: check-builder
+    runs-on: ${{ vars.HELIUM_SIDEBAR_BUILDER || 'windows-2025' }}
+    timeout-minutes: 720
+    outputs:
+      tag: ${{ steps.package.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile the pinned Helium source
+        shell: pwsh
+        run: |
+          python build.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package the browser
+        id: package
+        shell: pwsh
+        run: |
+          python -m scripts.package_sidebar sidebar-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = python helium-chromium/utils/helium_version.py --print --tree helium-chromium --platform-tree .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "tag=$version-sidebar-compact-r$env:GITHUB_RUN_NUMBER" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sidebar-browser
+          path: sidebar-release/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    needs: build
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.build.result == 'success' || (inputs.action != 'Build and publish' && needs.build.result == 'skipped')) }}
+    runs-on: windows-2025
+    timeout-minutes: 12
+    outputs:
+      tag: ${{ steps.candidate.outputs.tag }}
+      digest: ${{ steps.candidate.outputs.digest }}
+      release_id: ${{ steps.candidate.outputs.release_id }}
+      asset_id: ${{ steps.candidate.outputs.asset_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - if: inputs.action == 'Build and publish'
+        uses: actions/download-artifact@v4
+        with:
+          name: sidebar-browser
+          path: sidebar-release
+      - name: Select and verify the browser package
+        id: candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ inputs.action }}
+          DRAFT_TAG: ${{ inputs.draft_tag }}
+          BUILD_TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tagPattern = '^[0-9]{1,5}(?:\.[0-9]{1,5}){3}-sidebar-compact(?:-r[1-9][0-9]{0,8})?$'
+          $assetPattern = 'Helium-Sidebar-Compact-*-Windows-x64.zip'
+          if ($env:ACTION -eq 'Build and publish') {
+              $tag = $env:BUILD_TAG
+          } else {
+              if ($env:ACTION -eq 'Publish the prepared draft') {
+                  $releases = gh api --paginate "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft and (.prerelease | not))'
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  $drafts = @($releases | Where-Object { $_ } | ForEach-Object { ConvertFrom-Json -InputObject $_ } | Where-Object {
+                      $_.tag_name -match $tagPattern -and
+                      (!$env:DRAFT_TAG -or $_.tag_name -eq $env:DRAFT_TAG)
+                  })
+                  if ($drafts.Count -ne 1) { throw 'Prepare one sidebar draft, or enter its exact tag in Run workflow.' }
+                  $release = $drafts[0]
+              } else {
+                  $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" | ConvertFrom-Json
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              }
+              $tag = $release.tag_name
+              if ($tag -notmatch $tagPattern) { throw 'The selected release has an invalid sidebar tag.' }
+              $assets = @($release.assets | Where-Object name -like $assetPattern)
+              if ($assets.Count -ne 1 -or $assets[0].digest -notmatch '^sha256:[a-f0-9]{64}$') {
+                  throw 'Attach exactly one Windows x64 sidebar ZIP with a SHA-256 digest.'
+              }
+              $null = New-Item -ItemType Directory -Path sidebar-release
+              $package = 'sidebar-release/Helium-Sidebar-Compact-candidate-Windows-x64.zip'
+              $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/octet-stream' }
+              Invoke-WebRequest -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($assets[0].id)" `
+                  -Headers $headers -OutFile $package -TimeoutSec 240
+              "release_id=$($release.id)" >> $env:GITHUB_OUTPUT
+              "asset_id=$($assets[0].id)" >> $env:GITHUB_OUTPUT
+          }
+          $packages = @(Get-ChildItem sidebar-release -File -Filter $assetPattern)
+          if ($packages.Count -ne 1) { throw 'Expected one browser ZIP.' }
+          $digest = 'sha256:' + (Get-FileHash -LiteralPath $packages[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($assets -and $digest -ne $assets[0].digest) { throw 'The download failed SHA-256 verification.' }
+          & './portable/Test Sidebar Package.ps1' -Archive $packages[0].FullName -Tag $tag -TestDirectory "$env:RUNNER_TEMP/sidebar-test"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "digest=$digest" >> $env:GITHUB_OUTPUT
+
+  publish:
+    needs: verify
+    if: inputs.action != 'Test the current public release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.verify.outputs.tag }}
+      DIGEST: ${{ needs.verify.outputs.digest }}
+      RELEASE_ID: ${{ needs.verify.outputs.release_id }}
+      ASSET_ID: ${{ needs.verify.outputs.asset_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - if: inputs.action == 'Build and publish'
+        uses: actions/download-artifact@v4
+        with:
+          name: sidebar-browser
+          path: sidebar-release
+      - name: Make the verified release available to installed browsers
+        shell: pwsh
+        run: ./portable/Publish-SidebarRelease.ps1

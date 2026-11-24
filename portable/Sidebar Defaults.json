@@ -1,0 +1,14 @@
+{
+  "helium": {
+    "browser": {
+      "layout": 2,
+      "zen_mode": true,
+      "vertical_address_bar_in_sidebar": true,
+      "zen_mode_sidebar_pinned": true,
+      "zen_mode_top_chrome_pinned": false,
+      "mru_tab_cycling": true,
+      "visual_tab_switcher": true,
+      "visual_tab_switcher_list": true
+    }
+  }
+}
