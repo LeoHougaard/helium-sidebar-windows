@@ -4,9 +4,9 @@ This personal Helium build adds the PR #2367 sidebar, a compact row for navigati
 
 ### Install and update on Windows
 
-1. Sign in to GitHub and download **Helium-Sidebar-Setup.zip** from the [latest release](https://github.com/LeoHougaard/helium-sidebar-windows/releases/latest).
-2. Extract the setup ZIP and run **Install Helium Sidebar.cmd**. Setup installs GitHub CLI if needed and opens GitHub sign-in if you are signed out. Use the account that can access this private repository.
-3. Open **Helium Sidebar** from the Windows Start menu. Run **Update Helium Sidebar** from Start whenever you want the latest published custom build. Close and reopen the browser to switch to an installed update.
+1. Download **Helium-Sidebar-Public-Setup.zip** from the [latest release](https://github.com/LeoHougaard/helium-sidebar-windows/releases/latest).
+2. Extract the setup ZIP and run **Install Helium Sidebar.cmd**.
+3. Open **Helium Sidebar** from the Windows Start menu. It checks for updates in the background on launch at most once a day and downloads new releases for the next restart. **Update Helium Sidebar** checks immediately.
 
 Setup verifies each Windows x64 package against its GitHub release digest. The Start menu launcher uses the same separate compact-build browser profile as the portable ZIP, so its tabs and settings carry over on the same computer. The official Helium installation uses its own profile and updater.
 
